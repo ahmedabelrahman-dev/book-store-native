@@ -1,16 +1,23 @@
 import express from 'express';
 import User from '../models/User.js';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 
 const router = express.Router();
 
+// Generate JWT token
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '15d' });
 };
 
+// ---------------------
+// REGISTER
+// ---------------------
 router.post('/register', async (req, res) => {
   try {
     const { email, username, password } = req.body;
+
+    // Validation
     if (!username || !email || !password) {
       return res.status(400).json({ message: 'All fields are required' });
     }
@@ -24,7 +31,8 @@ router.post('/register', async (req, res) => {
         .status(400)
         .json({ message: 'Username should be at least 3 characters long' });
     }
-    // check if user already exists
+
+    // Check if email or username already exists
     const existingEmail = await User.findOne({ email });
     if (existingEmail) {
       return res.status(400).json({ message: 'Email already exists' });
@@ -33,16 +41,25 @@ router.post('/register', async (req, res) => {
     if (existingUsername) {
       return res.status(400).json({ message: 'Username already exists' });
     }
-    // get random avatar
+
+    // Hash password manually
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create new user
     const profileImage = `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
     const user = new User({
       email,
       username,
-      password,
+      password: hashedPassword,
       profileImage,
     });
+
     await user.save();
+
+    // Generate token
     const token = generateToken(user._id);
+
     res.status(201).json({
       token,
       user: {
@@ -54,24 +71,38 @@ router.post('/register', async (req, res) => {
       },
     });
   } catch (error) {
-    console.log('Error in register route', error);
+    console.error('Error in register route:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
 
+// ---------------------
+// LOGIN
+// ---------------------
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password)
+
+    // Validation
+    if (!email || !password) {
       return res.status(400).json({ message: 'All fields are required' });
-    // check if user exists
+    }
+
+    // Check if user exists
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-    // check if password is correct
-    const isPasswordCorrect = await user.comparePassword(password);
-    if (!isPasswordCorrect)
+    if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    // Compare password manually
+    const isPasswordCorrect = await bcrypt.compare(password, user.password);
+    if (!isPasswordCorrect) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    // Generate token
     const token = generateToken(user._id);
+
     res.status(200).json({
       token,
       user: {
@@ -83,7 +114,7 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (error) {
-    console.log('Error in login route', error);
+    console.error('Error in login route:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
